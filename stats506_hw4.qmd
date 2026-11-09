@@ -274,7 +274,7 @@ plot_b <- states_only |>
   ggplot(mapping = aes(x = as.Date(date), 
                        y = cases_avg_per_100k, color = state)) + 
   geom_line() + 
-  scale_x_date(name = NULL, date_breaks = "5 months", date_labels = "%b\n%Y") +
+  scale_x_date(date_breaks = "5 months", date_labels = "%b\n%Y") +
   labs(title = "New Covid-19 Cases for States with Highest/Lowest Overall Rate", 
        x = "Date", y = "New Cases per 100k People (7-day Avg) ") +
   scale_color_manual(name = NULL, values = c("violetred", "royalblue4")) +
