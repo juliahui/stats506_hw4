@@ -1,0 +1,366 @@
+---
+title: "stats506_hw4"
+format:
+  html:
+    embed-resources: true
+source: editor
+---
+
+github repo: https://github.com/juliahui/stats506_hw4.git
+
+```{r}
+#download package nzelect to use data nzge
+#install.packages("remotes")
+
+#remotes::install_version(
+  #"nzelect",
+  #repos = "https://cloud.r-project.org"
+#)
+
+#install.packages("infer")
+```
+
+```{r}
+library(nzelect)
+library(tidyverse)
+library(infer) #t_test
+library(ggplot2)
+library(scales) #for labels = label_comma()
+```
+
+Problem 1 - Tidyverse: New Zealand
+
+a.
+```{r}
+nzge <- nzge
+head(nzge)
+
+#help(nzge)
+
+vote_count <- nzge |>
+  group_by(election_year, voting_type) |>
+  summarize(num_votes = sum(votes)) |>
+  arrange(num_votes) |>
+  ungroup() |>
+  rename(
+    "Election Year" = election_year,
+    "Voting Type" = voting_type,
+    "Total Vote Count" = num_votes
+  ) 
+vote_count
+```
+
+b.
+```{r}
+#proportion of votes for each party in 2014 Candidate election
+  #sorted by percent of vote
+party_props <- nzge |>
+  filter(election_year == 2014 & voting_type == "Candidate") |>
+  group_by(party) |>
+  summarize(num_votes = sum(votes)) |>
+  mutate(vote_prop = num_votes / sum(num_votes)) |>
+  arrange(desc(vote_prop)) |>
+  ungroup() |>
+    rename(
+    "Party" = party,
+    "Number of Votes" = num_votes,
+    "Proportion of Total Votes" = vote_prop
+  )
+party_props
+```
+
+c.
+```{r}
+winning_party <- nzge |>
+  group_by(election_year, voting_type, party) |>
+  summarize(num_votes = sum(votes)) |>
+  slice_max(order_by = num_votes, n = 1) |>
+  ungroup() |>
+  #just show year + winner
+  select(-num_votes) |> 
+  pivot_wider(names_from = voting_type, values_from = party) |>
+  rename(
+    "Election Year" = election_year,
+    "Candidate Vote Winner" = Candidate,
+    "Party Vote Winner" = Party
+  )
+winning_party
+```
+
+Problem 2 - Tidyverse: Tennis
+
+Your answers should show both the output from R that allows you to answer it, 
+as well as a written answer.
+
+Referenced matches_data_dictionary.txt for variable names
+```{r}
+atp <- read.csv("atp_matches_2019.csv")
+head(atp)
+```
+
+a. How many tournaments took place in 2019?
+```{r}
+#https://www.statology.org/dplyr-count-distinct/ for idea
+num_tournaments_2019 <- atp |>
+  summarize("Number of tournaments" = n_distinct(tourney_id))
+num_tournaments_2019
+```
+
+128 tournaments took place in 2019. 
+
+b. Did any player win more than one tournament? 
+If so, how many players won more than one tournament, and how many tournaments 
+did the most winning player(s) win?
+```{r}
+tournament_wins <- atp |>
+  #based on documentation in github, F should be the final round
+    #of a tournament -> winner should be tournament winner
+  filter(round == "F") |>
+  group_by(winner_name) |>
+  #reminder: n() counts num rows in each group
+  summarize(tournaments_won = n()) |>
+  arrange(desc(tournaments_won)) |>
+  ungroup()
+tournament_wins
+
+more_than_one <- tournament_wins |>
+  filter(tournaments_won > 1)
+more_than_one
+
+most_wins <- more_than_one |> 
+  slice_max(order_by = tournaments_won, with_ties = TRUE)
+most_wins
+```
+
+Yes, 12 players won more than one tournament. The players that won the most 
+tournaments both won 5 (Dominic Thiem and Novak Djokovic). 
+
+c. Is there any evidence that winners have more aces than losers? 
+(If you address this with a hypothesis test, do not use base R functionality - 
+continue to remain in the Tidyverse.)
+```{r}
+aces_test <- atp |>
+  mutate(num_aces_diff  = w_ace - l_ace) |>
+  t_test(response = num_aces_diff, mu = 0, alternative = "greater")
+aces_test
+```
+
+The very small p-value (1.53e-34) means we reject the null that the difference 
+between the number of winners' aces and losers' aces is 0. On average, it 
+appears that winners have about 1.705 more aces than losers. 
+
+d. Identify the player(s) with the highest win-rate. 
+(Note that this is NOT asking for the highest number of wins.) 
+Restrict to players with at least 5 matches.
+
+```{r}
+#get number of matches won for each player
+matches_won <- atp |>
+  group_by(winner_name) |>
+  summarize(matches_won = n()) |>
+  arrange(matches_won) |>
+  #for joining later
+  rename(player_name = winner_name) |> 
+  ungroup()
+head(matches_won)
+
+#get num of matches lost for each player
+matches_lost <- atp |>
+  group_by(loser_name) |>
+  summarize(matches_lost = n()) |>
+  arrange(matches_lost) |>
+  rename(player_name = loser_name) |> 
+  ungroup()
+head(matches_lost)
+
+#join to get all the players' matches in one df
+total_matches <- left_join(matches_won, matches_lost, by = "player_name") |>
+  mutate(
+    total_matches = matches_won + matches_lost,
+    win_rate = matches_won / total_matches
+  ) |>
+  filter(total_matches >= 5) |>
+  arrange(desc(win_rate)) |>
+  slice_max(order_by = win_rate, with_ties = TRUE)
+total_matches
+```
+
+Rafael Nadal had the highest win rate, about 87%. 
+
+Problem 3 - Visualization 
+```{r}
+#https://github.com/nytimes/covid-19-data/tree/master/rolling-averages
+  #cases_avg: avg num of new cases reported over the most recent 7 days of data
+us_states <- read.csv("us-states.csv")
+head(us_states)
+#unique(us_states$state)
+```
+
+a. How many major and minor spikes in cases were there?
+```{r}
+#https://www.r-bloggers.com/2023/11/getting-started-with-theme/
+
+#tried just raw data, plot wasn't clear enough
+  #use 7 day averages instead
+us_states_a <- us_states |>
+  group_by(date) |>
+    #line idea from um-gpt
+  summarize(cases_avg = sum(cases_avg)) |>
+  ungroup()
+
+plot_a <- us_states_a |>
+  ggplot(mapping = aes(x = as.Date(date), y = cases_avg)) + 
+  geom_line(color = "darkblue") + 
+  scale_x_date(date_breaks = "5 months", date_labels = "%b\n%Y") + 
+  #https://stackoverflow.com/questions/14563989/force-r-to-stop-plotting-abbreviated-axis-labels-scientific-notation-e-g-1e
+  scale_y_continuous(labels = label_comma()) + 
+  labs(title = "New Covid-19 Cases in the U.S.", 
+       x = "Date", y = "New Cases per Day (National 7-day Avg)") + 
+  theme_minimal() + 
+  theme(
+    #makes the axes more visible 
+    axis.line = element_line(colour = "grey20"),
+    #gets rid of the minor grid lines for cleaner look
+    panel.grid.minor = element_blank(),
+    #modify font
+    text = element_text(family = "serif"),
+    #adjust plot title
+    plot.title = element_text(hjust = 0.5, size = 17),
+    #pushes y axis label to the left
+    axis.title.y = element_text(margin = margin(r = 10)),
+    #pushes x axis label down
+    axis.title.x = element_text(margin = margin(t = 10)),
+    #add more space around edges of plot
+    plot.margin = margin(t = 20, r = 20, b = 15, l = 15)
+  )
+plot_a 
+```
+
+There seems to be one major spike between about December 2021 and March 2022. 
+Aside from this very clear spike, there's 3 minor spikes from November 2020 to 
+February 2021, August 2021 to November 2021, and May 2022-September 2022. 
+
+b. For the states with the highest and lowest overall rates per population, 
+what differences do you see in their trajectories over time?
+```{r}
+not_states <- c("District of Columbia", "Puerto Rico", "Guam", "Virgin Islands",
+            "Northern Mariana Islands", "American Samoa")
+
+states_only <- us_states |>
+  #keep states only
+  filter(!(state %in% not_states))
+
+#assuming cases_avg_per_100k is rate per popul (based on github) 
+us_states_b <- states_only |>
+  group_by(state) |>
+  summarize(overall_rate = sum(cases_avg_per_100k)) |>
+  arrange(desc(overall_rate)) |>
+  ungroup()
+head(us_states_b)
+#unique(us_states_b$state) #just to check
+
+highest_overall_rate <- us_states_b |>
+  slice_max(order_by = overall_rate)
+
+lowest_overall_rate <- us_states_b |>
+  slice_min(order_by = overall_rate)
+
+#just get the states' names for plotting
+rates <- c(highest_overall_rate$state, lowest_overall_rate$state)
+rates
+
+plot_b <- states_only |>
+  filter(state %in% rates) |>
+  ggplot(mapping = aes(x = as.Date(date), 
+                       y = cases_avg_per_100k, color = state)) + 
+  geom_line() + 
+  scale_x_date(name = NULL, date_breaks = "5 months", date_labels = "%b\n%Y") +
+  labs(title = "New Covid-19 Cases for States with Highest/Lowest Overall Rate", 
+       x = "Date", y = "New Cases per 100k People (7-day Avg) ") +
+  scale_color_manual(name = NULL, values = c("violetred", "royalblue4")) +
+  theme_minimal() + 
+  theme(
+    #makes the axes more visible 
+    axis.line = element_line(colour = "grey20"),
+    #gets rid of the minor grid lines for cleaner look
+    panel.grid.minor = element_blank(),
+    #modify font
+    text = element_text(family = "serif"),
+    #adjust plot title
+    plot.title = element_text(hjust = 0.5, size = 15),
+    #pushes y axis label to the left
+    axis.title.y = element_text(margin = margin(r = 10)),
+    #pushes x axis label down
+    axis.title.x = element_text(margin = margin(t = 10)),
+    #add more space around edges of plot
+    plot.margin = margin(t = 20, r = 20, b = 15, l = 15), 
+    legend.position = "bottom"
+  )
+plot_b
+```
+
+Rhode Island had the highest overall rate, and Maine had the lowest. The differ 
+mostly in periods where Rhode Island experiences an increase in the average 
+number of new cases while Maine stays relatively constant, or experiences a 
+smaller increase. For example, between about December 2021 and March 2022, 
+Rhode Island experiences a huge spike in the average number of new cases, while
+Maine's numbers are mostly constant. 
+
+c. Identify, to the best of your ability without a formal test, 
+the first five states to experience Covid in a substantial way.
+```{r}
+#first date each state reached 25 new daily cases per 100,000 people
+first_five <- states_only |>
+  filter(cases_avg_per_100k >= 25) |>
+  group_by(state) |>
+  summarize(first_date = min(date)) |>
+  arrange(first_date) |>
+  ungroup() |>
+  slice_head(n = 5)
+first_five
+
+#beginning of pandemic (for plotting) (checked when cases started increasing)
+pandemic_start <- states_only |>
+  filter(date >= as.Date("2020-03-01"), date <= as.Date("2020-05-30"))
+
+plot_c <- pandemic_start|>
+  ggplot(mapping = aes(x = as.Date(date), y = cases_avg_per_100k)) +
+  #grey lines for every state
+  geom_line(aes(group = state), color = "grey80") +
+  geom_hline(yintercept = 25, color = "grey50") + 
+  #colored lines on top for the first five states
+  geom_line(data = filter(pandemic_start, state %in% first_five$state),
+            aes(color = state), linewidth = 0.8) +
+  scale_x_date(date_breaks = "1 week", date_labels = "%b %d") +
+  labs(title = "First 5 States to Experience 25 New Cases per 100k People", 
+       x = "Date", y = "New Cases per 100k People (7-day Avg)", 
+       subtitle = "Grey horizontal line: 25 new daily cases per 100k") +
+  scale_color_discrete(name = "First Five States", breaks = first_five$state) +
+  theme_minimal() + 
+  theme(
+    #makes the axes more visible 
+    axis.line = element_line(colour = "grey10"),
+    #gets rid of the minor grid lines for cleaner look
+    panel.grid.minor = element_blank(),
+    #modify font
+    text = element_text(family = "serif"),
+    #adjust plot title
+    plot.title = element_text(hjust = 0.5, size = 15),
+    plot.subtitle = element_text(hjust = 0.5, size = 9),
+    #pushes y axis label to the left
+    axis.title.y = element_text(margin = margin(r = 10)),
+    #pushes x axis label down
+    axis.title.x = element_text(margin = margin(t = 10)),
+    #add more space around edges of plot
+    plot.margin = margin(t = 20, r = 20, b = 15, l = 15), 
+    legend.position = "bottom"
+  )
+plot_c
+```
+
+The first five states to experience Covid in a substantial way, which I defined 
+as reaching a 7-day average of at least 25 new cases per 100k people, were 
+New York, New Jersey, Louisiana, Connecticut, and Massachusetts. 
+
+
+
